@@ -6,7 +6,7 @@ func Handler(si ServerInterface) http.Handler {
 type ChiServerOptions struct {
     BaseURL string
     BaseRouter chi.Router
-    Middlewares []MiddlewareFunc
+    Middlewares map[string]MiddlewareFunc
     ErrorHandlerFunc   func(w http.ResponseWriter, r *http.Request, err error)
 }
 
@@ -29,7 +29,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 r := options.BaseRouter
 
 if r == nil {
-r = chi.NewRouter()
+    r = chi.NewRouter()
 }
 if options.ErrorHandlerFunc == nil {
     options.ErrorHandlerFunc = func(w http.ResponseWriter, r *http.Request, err error) {
@@ -38,13 +38,40 @@ if options.ErrorHandlerFunc == nil {
 }
 {{if .}}wrapper := ServerInterfaceWrapper{
 Handler: si,
-HandlerMiddlewares: options.Middlewares,
+Middlewares: options.Middlewares,
 ErrorHandlerFunc: options.ErrorHandlerFunc,
 }
 {{end}}
-{{range .}}r.Group(func(r chi.Router) {
-r.{{.Method | lower | title }}(options.BaseURL+"{{.Path | swaggerUriToChiUri}}", wrapper.{{.OperationId}})
-})
+{{range .}}
+r.Method(http.Method{{.Method | lower | title }}, options.BaseURL+"{{.Path | swaggerUriToChiUri}}", HandlerFunc(wrapper.{{.OperationId}}))
 {{end}}
+
 return r
+}
+
+type ErrorContextKey struct{}
+
+type HandlerFunc func(w http.ResponseWriter, r *http.Request) error
+
+func (h HandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if err := h(w, r); err != nil {
+		// set the error in the request context
+		errPtr, ok := r.Context().Value(ErrorContextKey{}).(*error)
+		if !ok {
+			panic("request context does not contain error pointer")
+		}
+		*errPtr = err
+
+
+	}
+}
+
+// TODO: add status code?
+func RespondJSON(w http.ResponseWriter, v interface{}) error {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		return err
+	}
+	_, err := w.Write(buf.Bytes())
+	return err
 }

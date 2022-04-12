@@ -4,6 +4,8 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -131,78 +133,74 @@ type UpdateResource3JSONRequestBody UpdateResource3JSONBody
 type ServerInterface interface {
 	// get every type optional
 	// (GET /every-type-optional)
-	GetEveryTypeOptional(w http.ResponseWriter, r *http.Request)
+	GetEveryTypeOptional(w http.ResponseWriter, r *http.Request) error
 	// Get resource via simple path
 	// (GET /get-simple)
-	GetSimple(w http.ResponseWriter, r *http.Request)
+	GetSimple(w http.ResponseWriter, r *http.Request) error
 	// Getter with referenced parameter and referenced response
 	// (GET /get-with-args)
-	GetWithArgs(w http.ResponseWriter, r *http.Request, params GetWithArgsParams)
+	GetWithArgs(w http.ResponseWriter, r *http.Request, params GetWithArgsParams) error
 	// Getter with referenced parameter and referenced response
 	// (GET /get-with-references/{global_argument}/{argument})
-	GetWithReferences(w http.ResponseWriter, r *http.Request, globalArgument int64, argument Argument)
+	GetWithReferences(w http.ResponseWriter, r *http.Request, globalArgument int64, argument Argument) error
 	// Get an object by ID
 	// (GET /get-with-type/{content_type})
-	GetWithContentType(w http.ResponseWriter, r *http.Request, contentType GetWithContentTypeParamsContentType)
+	GetWithContentType(w http.ResponseWriter, r *http.Request, contentType GetWithContentTypeParamsContentType) error
 	// get with reserved keyword
 	// (GET /reserved-keyword)
-	GetReservedKeyword(w http.ResponseWriter, r *http.Request)
+	GetReservedKeyword(w http.ResponseWriter, r *http.Request) error
 	// Create a resource
 	// (POST /resource/{argument})
-	CreateResource(w http.ResponseWriter, r *http.Request, argument Argument)
+	CreateResource(w http.ResponseWriter, r *http.Request, argument Argument) error
 	// Create a resource with inline parameter
 	// (POST /resource2/{inline_argument})
-	CreateResource2(w http.ResponseWriter, r *http.Request, inlineArgument int, params CreateResource2Params)
+	CreateResource2(w http.ResponseWriter, r *http.Request, inlineArgument int, params CreateResource2Params) error
 	// Update a resource with inline body. The parameter name is a reserved
 	// keyword, so make sure that gets prefixed to avoid syntax errors
 	// (PUT /resource3/{fallthrough})
-	UpdateResource3(w http.ResponseWriter, r *http.Request, pFallthrough int)
+	UpdateResource3(w http.ResponseWriter, r *http.Request, pFallthrough int) error
 	// get response with reference
 	// (GET /response-with-reference)
-	GetResponseWithReference(w http.ResponseWriter, r *http.Request)
+	GetResponseWithReference(w http.ResponseWriter, r *http.Request) error
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
 type ServerInterfaceWrapper struct {
-	Handler            ServerInterface
-	HandlerMiddlewares []MiddlewareFunc
-	ErrorHandlerFunc   func(w http.ResponseWriter, r *http.Request, err error)
+	Handler          ServerInterface
+	Middlewares      map[string]MiddlewareFunc
+	ErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
 }
 
-type MiddlewareFunc func(http.HandlerFunc) http.HandlerFunc
+type MiddlewareFunc func(HandlerFunc) HandlerFunc
 
 // GetEveryTypeOptional operation middleware
-func (siw *ServerInterfaceWrapper) GetEveryTypeOptional(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) GetEveryTypeOptional(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetEveryTypeOptional(w, r)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.GetEveryTypeOptional(w, r)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 // GetSimple operation middleware
-func (siw *ServerInterfaceWrapper) GetSimple(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) GetSimple(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetSimple(w, r)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.GetSimple(w, r)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 // GetWithArgs operation middleware
-func (siw *ServerInterfaceWrapper) GetWithArgs(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) GetWithArgs(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
 	var err error
@@ -218,7 +216,7 @@ func (siw *ServerInterfaceWrapper) GetWithArgs(w http.ResponseWriter, r *http.Re
 	err = runtime.BindQueryParameter("form", true, false, "optional_argument", r.URL.Query(), &params.OptionalArgument)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "optional_argument", Err: err})
-		return
+		return nil
 	}
 
 	// ------------- Required query parameter "required_argument" -------------
@@ -226,13 +224,13 @@ func (siw *ServerInterfaceWrapper) GetWithArgs(w http.ResponseWriter, r *http.Re
 
 	} else {
 		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "required_argument"})
-		return
+		return nil
 	}
 
 	err = runtime.BindQueryParameter("form", true, true, "required_argument", r.URL.Query(), &params.RequiredArgument)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "required_argument", Err: err})
-		return
+		return nil
 	}
 
 	headers := r.Header
@@ -243,32 +241,30 @@ func (siw *ServerInterfaceWrapper) GetWithArgs(w http.ResponseWriter, r *http.Re
 		n := len(valueList)
 		if n != 1 {
 			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "header_argument", Count: n})
-			return
+			return nil
 		}
 
 		err = runtime.BindStyledParameterWithLocation("simple", false, "header_argument", runtime.ParamLocationHeader, valueList[0], &HeaderArgument)
 		if err != nil {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "header_argument", Err: err})
-			return
+			return nil
 		}
 
 		params.HeaderArgument = &HeaderArgument
 
 	}
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetWithArgs(w, r, params)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.GetWithArgs(w, r, params)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 // GetWithReferences operation middleware
-func (siw *ServerInterfaceWrapper) GetWithReferences(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) GetWithReferences(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
 	var err error
@@ -279,7 +275,7 @@ func (siw *ServerInterfaceWrapper) GetWithReferences(w http.ResponseWriter, r *h
 	err = runtime.BindStyledParameter("simple", false, "global_argument", chi.URLParam(r, "global_argument"), &globalArgument)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "global_argument", Err: err})
-		return
+		return nil
 	}
 
 	// ------------- Path parameter "argument" -------------
@@ -288,22 +284,20 @@ func (siw *ServerInterfaceWrapper) GetWithReferences(w http.ResponseWriter, r *h
 	err = runtime.BindStyledParameter("simple", false, "argument", chi.URLParam(r, "argument"), &argument)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "argument", Err: err})
-		return
+		return nil
 	}
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetWithReferences(w, r, globalArgument, argument)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.GetWithReferences(w, r, globalArgument, argument)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 // GetWithContentType operation middleware
-func (siw *ServerInterfaceWrapper) GetWithContentType(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) GetWithContentType(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
 	var err error
@@ -314,37 +308,33 @@ func (siw *ServerInterfaceWrapper) GetWithContentType(w http.ResponseWriter, r *
 	err = runtime.BindStyledParameter("simple", false, "content_type", chi.URLParam(r, "content_type"), &contentType)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "content_type", Err: err})
-		return
+		return nil
 	}
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetWithContentType(w, r, contentType)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.GetWithContentType(w, r, contentType)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 // GetReservedKeyword operation middleware
-func (siw *ServerInterfaceWrapper) GetReservedKeyword(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) GetReservedKeyword(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetReservedKeyword(w, r)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.GetReservedKeyword(w, r)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 // CreateResource operation middleware
-func (siw *ServerInterfaceWrapper) CreateResource(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) CreateResource(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
 	var err error
@@ -355,22 +345,20 @@ func (siw *ServerInterfaceWrapper) CreateResource(w http.ResponseWriter, r *http
 	err = runtime.BindStyledParameter("simple", false, "argument", chi.URLParam(r, "argument"), &argument)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "argument", Err: err})
-		return
+		return nil
 	}
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateResource(w, r, argument)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.CreateResource(w, r, argument)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 // CreateResource2 operation middleware
-func (siw *ServerInterfaceWrapper) CreateResource2(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) CreateResource2(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
 	var err error
@@ -381,7 +369,7 @@ func (siw *ServerInterfaceWrapper) CreateResource2(w http.ResponseWriter, r *htt
 	err = runtime.BindStyledParameter("simple", false, "inline_argument", chi.URLParam(r, "inline_argument"), &inlineArgument)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "inline_argument", Err: err})
-		return
+		return nil
 	}
 
 	// Parameter object where we will unmarshal all parameters from the context
@@ -395,22 +383,20 @@ func (siw *ServerInterfaceWrapper) CreateResource2(w http.ResponseWriter, r *htt
 	err = runtime.BindQueryParameter("form", true, false, "inline_query_argument", r.URL.Query(), &params.InlineQueryArgument)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "inline_query_argument", Err: err})
-		return
+		return nil
 	}
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateResource2(w, r, inlineArgument, params)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.CreateResource2(w, r, inlineArgument, params)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 // UpdateResource3 operation middleware
-func (siw *ServerInterfaceWrapper) UpdateResource3(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) UpdateResource3(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
 	var err error
@@ -421,33 +407,29 @@ func (siw *ServerInterfaceWrapper) UpdateResource3(w http.ResponseWriter, r *htt
 	err = runtime.BindStyledParameter("simple", false, "fallthrough", chi.URLParam(r, "fallthrough"), &pFallthrough)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fallthrough", Err: err})
-		return
+		return nil
 	}
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpdateResource3(w, r, pFallthrough)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.UpdateResource3(w, r, pFallthrough)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 // GetResponseWithReference operation middleware
-func (siw *ServerInterfaceWrapper) GetResponseWithReference(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) GetResponseWithReference(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetResponseWithReference(w, r)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.GetResponseWithReference(w, r)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 type UnescapedCookieParamError struct {
@@ -527,7 +509,7 @@ func Handler(si ServerInterface) http.Handler {
 type ChiServerOptions struct {
 	BaseURL          string
 	BaseRouter       chi.Router
-	Middlewares      []MiddlewareFunc
+	Middlewares      map[string]MiddlewareFunc
 	ErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
 }
 
@@ -558,41 +540,56 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		}
 	}
 	wrapper := ServerInterfaceWrapper{
-		Handler:            si,
-		HandlerMiddlewares: options.Middlewares,
-		ErrorHandlerFunc:   options.ErrorHandlerFunc,
+		Handler:          si,
+		Middlewares:      options.Middlewares,
+		ErrorHandlerFunc: options.ErrorHandlerFunc,
 	}
 
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/every-type-optional", wrapper.GetEveryTypeOptional)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/get-simple", wrapper.GetSimple)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/get-with-args", wrapper.GetWithArgs)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/get-with-references/{global_argument}/{argument}", wrapper.GetWithReferences)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/get-with-type/{content_type}", wrapper.GetWithContentType)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/reserved-keyword", wrapper.GetReservedKeyword)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/resource/{argument}", wrapper.CreateResource)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/resource2/{inline_argument}", wrapper.CreateResource2)
-	})
-	r.Group(func(r chi.Router) {
-		r.Put(options.BaseURL+"/resource3/{fallthrough}", wrapper.UpdateResource3)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/response-with-reference", wrapper.GetResponseWithReference)
-	})
+	r.Method(http.MethodGet, options.BaseURL+"/every-type-optional", HandlerFunc(wrapper.GetEveryTypeOptional))
+
+	r.Method(http.MethodGet, options.BaseURL+"/get-simple", HandlerFunc(wrapper.GetSimple))
+
+	r.Method(http.MethodGet, options.BaseURL+"/get-with-args", HandlerFunc(wrapper.GetWithArgs))
+
+	r.Method(http.MethodGet, options.BaseURL+"/get-with-references/{global_argument}/{argument}", HandlerFunc(wrapper.GetWithReferences))
+
+	r.Method(http.MethodGet, options.BaseURL+"/get-with-type/{content_type}", HandlerFunc(wrapper.GetWithContentType))
+
+	r.Method(http.MethodGet, options.BaseURL+"/reserved-keyword", HandlerFunc(wrapper.GetReservedKeyword))
+
+	r.Method(http.MethodPost, options.BaseURL+"/resource/{argument}", HandlerFunc(wrapper.CreateResource))
+
+	r.Method(http.MethodPost, options.BaseURL+"/resource2/{inline_argument}", HandlerFunc(wrapper.CreateResource2))
+
+	r.Method(http.MethodPut, options.BaseURL+"/resource3/{fallthrough}", HandlerFunc(wrapper.UpdateResource3))
+
+	r.Method(http.MethodGet, options.BaseURL+"/response-with-reference", HandlerFunc(wrapper.GetResponseWithReference))
 
 	return r
+}
+
+type ErrorContextKey struct{}
+
+type HandlerFunc func(w http.ResponseWriter, r *http.Request) error
+
+func (h HandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if err := h(w, r); err != nil {
+		// set the error in the request context
+		errPtr, ok := r.Context().Value(ErrorContextKey{}).(*error)
+		if !ok {
+			panic("request context does not contain error pointer")
+		}
+		*errPtr = err
+
+	}
+}
+
+// TODO: add status code?
+func RespondJSON(w http.ResponseWriter, v interface{}) error {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		return err
+	}
+	_, err := w.Write(buf.Bytes())
+	return err
 }

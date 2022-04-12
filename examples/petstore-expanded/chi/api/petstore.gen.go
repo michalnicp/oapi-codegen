@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -64,29 +65,29 @@ type AddPetJSONRequestBody AddPetJSONBody
 type ServerInterface interface {
 	// Returns all pets
 	// (GET /pets)
-	FindPets(w http.ResponseWriter, r *http.Request, params FindPetsParams)
+	FindPets(w http.ResponseWriter, r *http.Request, params FindPetsParams) error
 	// Creates a new pet
 	// (POST /pets)
-	AddPet(w http.ResponseWriter, r *http.Request)
+	AddPet(w http.ResponseWriter, r *http.Request) error
 	// Deletes a pet by ID
 	// (DELETE /pets/{id})
-	DeletePet(w http.ResponseWriter, r *http.Request, id int64)
+	DeletePet(w http.ResponseWriter, r *http.Request, id int64) error
 	// Returns a pet by ID
 	// (GET /pets/{id})
-	FindPetByID(w http.ResponseWriter, r *http.Request, id int64)
+	FindPetByID(w http.ResponseWriter, r *http.Request, id int64) error
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
 type ServerInterfaceWrapper struct {
-	Handler            ServerInterface
-	HandlerMiddlewares []MiddlewareFunc
-	ErrorHandlerFunc   func(w http.ResponseWriter, r *http.Request, err error)
+	Handler          ServerInterface
+	Middlewares      map[string]MiddlewareFunc
+	ErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
 }
 
-type MiddlewareFunc func(http.HandlerFunc) http.HandlerFunc
+type MiddlewareFunc func(HandlerFunc) HandlerFunc
 
 // FindPets operation middleware
-func (siw *ServerInterfaceWrapper) FindPets(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) FindPets(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
 	var err error
@@ -102,7 +103,7 @@ func (siw *ServerInterfaceWrapper) FindPets(w http.ResponseWriter, r *http.Reque
 	err = runtime.BindQueryParameter("form", true, false, "tags", r.URL.Query(), &params.Tags)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tags", Err: err})
-		return
+		return nil
 	}
 
 	// ------------- Optional query parameter "limit" -------------
@@ -113,37 +114,33 @@ func (siw *ServerInterfaceWrapper) FindPets(w http.ResponseWriter, r *http.Reque
 	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		return
+		return nil
 	}
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.FindPets(w, r, params)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.FindPets(w, r, params)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 // AddPet operation middleware
-func (siw *ServerInterfaceWrapper) AddPet(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) AddPet(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.AddPet(w, r)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.AddPet(w, r)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 // DeletePet operation middleware
-func (siw *ServerInterfaceWrapper) DeletePet(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) DeletePet(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
 	var err error
@@ -154,22 +151,20 @@ func (siw *ServerInterfaceWrapper) DeletePet(w http.ResponseWriter, r *http.Requ
 	err = runtime.BindStyledParameter("simple", false, "id", chi.URLParam(r, "id"), &id)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
+		return nil
 	}
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeletePet(w, r, id)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.DeletePet(w, r, id)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 // FindPetByID operation middleware
-func (siw *ServerInterfaceWrapper) FindPetByID(w http.ResponseWriter, r *http.Request) {
+func (siw *ServerInterfaceWrapper) FindPetByID(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
 	var err error
@@ -180,18 +175,16 @@ func (siw *ServerInterfaceWrapper) FindPetByID(w http.ResponseWriter, r *http.Re
 	err = runtime.BindStyledParameter("simple", false, "id", chi.URLParam(r, "id"), &id)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
+		return nil
 	}
 
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.FindPetByID(w, r, id)
+	var handler = func(w http.ResponseWriter, r *http.Request) error {
+		return siw.Handler.FindPetByID(w, r, id)
 	}
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
+	// middleware
 
-	handler(w, r.WithContext(ctx))
+	return handler(w, r.WithContext(ctx))
 }
 
 type UnescapedCookieParamError struct {
@@ -271,7 +264,7 @@ func Handler(si ServerInterface) http.Handler {
 type ChiServerOptions struct {
 	BaseURL          string
 	BaseRouter       chi.Router
-	Middlewares      []MiddlewareFunc
+	Middlewares      map[string]MiddlewareFunc
 	ErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
 }
 
@@ -302,25 +295,46 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		}
 	}
 	wrapper := ServerInterfaceWrapper{
-		Handler:            si,
-		HandlerMiddlewares: options.Middlewares,
-		ErrorHandlerFunc:   options.ErrorHandlerFunc,
+		Handler:          si,
+		Middlewares:      options.Middlewares,
+		ErrorHandlerFunc: options.ErrorHandlerFunc,
 	}
 
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/pets", wrapper.FindPets)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/pets", wrapper.AddPet)
-	})
-	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/pets/{id}", wrapper.DeletePet)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/pets/{id}", wrapper.FindPetByID)
-	})
+	r.Method(http.MethodGet, options.BaseURL+"/pets", HandlerFunc(wrapper.FindPets))
+
+	r.Method(http.MethodPost, options.BaseURL+"/pets", HandlerFunc(wrapper.AddPet))
+
+	r.Method(http.MethodDelete, options.BaseURL+"/pets/{id}", HandlerFunc(wrapper.DeletePet))
+
+	r.Method(http.MethodGet, options.BaseURL+"/pets/{id}", HandlerFunc(wrapper.FindPetByID))
 
 	return r
+}
+
+type ErrorContextKey struct{}
+
+type HandlerFunc func(w http.ResponseWriter, r *http.Request) error
+
+func (h HandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if err := h(w, r); err != nil {
+		// set the error in the request context
+		errPtr, ok := r.Context().Value(ErrorContextKey{}).(*error)
+		if !ok {
+			panic("request context does not contain error pointer")
+		}
+		*errPtr = err
+
+	}
+}
+
+// TODO: add status code?
+func RespondJSON(w http.ResponseWriter, v interface{}) error {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		return err
+	}
+	_, err := w.Write(buf.Bytes())
+	return err
 }
 
 // Base64 encoded, gzipped, json marshaled Swagger object

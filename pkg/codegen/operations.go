@@ -209,6 +209,8 @@ type OperationDefinition struct {
 	Method              string                  // GET, POST, DELETE, etc.
 	Path                string                  // The Swagger path for the operation, like /resource/{id}
 	Spec                *openapi3.Operation
+
+	Middlewares []string // Sent as part of x-oapi-codegen-middlewares.
 }
 
 // Returns the list of all parameters except Path parameters. Path parameters
@@ -387,6 +389,15 @@ func OperationDefinitions(swagger *openapi3.T) ([]OperationDefinition, error) {
 				requestPath, err)
 		}
 
+		var pathMiddlewares []string
+		if extension, ok := pathItem.Extensions[extPropMiddlewares]; ok {
+			var err error
+			pathMiddlewares, err = extMiddlewares(extension)
+			if err != nil {
+				return nil, fmt.Errorf("invalid value for %q: %w", extPropMiddlewares, err)
+			}
+		}
+
 		// Each path can have a number of operations, POST, GET, OPTIONS, etc.
 		pathOps := pathItem.Operations()
 		for _, opName := range SortedOperationsKeys(pathOps) {
@@ -401,7 +412,6 @@ func OperationDefinitions(swagger *openapi3.T) ([]OperationDefinition, error) {
 					return nil, fmt.Errorf("error generating default OperationID for %s/%s: %s",
 						opName, requestPath, err)
 				}
-				op.OperationID = op.OperationID
 			} else {
 				op.OperationID = ToCamelCase(op.OperationID)
 			}
@@ -426,6 +436,15 @@ func OperationDefinitions(swagger *openapi3.T) ([]OperationDefinition, error) {
 				return nil, err
 			}
 
+			middlewares := pathMiddlewares
+			if extension, ok := op.Extensions[extPropMiddlewares]; ok {
+				opMiddlewares, err := extMiddlewares(extension)
+				if err != nil {
+					return nil, fmt.Errorf("invalid value for %q: %w", extPropMiddlewares, err)
+				}
+				middlewares = append(middlewares, opMiddlewares...)
+			}
+
 			bodyDefinitions, typeDefinitions, err := GenerateBodyDefinitions(op.OperationID, op.RequestBody)
 			if err != nil {
 				return nil, fmt.Errorf("error generating body definitions: %w", err)
@@ -444,6 +463,7 @@ func OperationDefinitions(swagger *openapi3.T) ([]OperationDefinition, error) {
 				Spec:            op,
 				Bodies:          bodyDefinitions,
 				TypeDefinitions: typeDefinitions,
+				Middlewares:     middlewares,
 			}
 
 			// check for overrides of SecurityDefinitions.

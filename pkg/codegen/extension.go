@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	extPropGoType    = "x-go-type"
-	extPropOmitEmpty = "x-omitempty"
-	extPropExtraTags = "x-oapi-codegen-extra-tags"
+	extPropGoType      = "x-go-type"
+	extPropOmitEmpty   = "x-omitempty"
+	extPropExtraTags   = "x-oapi-codegen-extra-tags"
+	extPropMiddlewares = "x-oapi-codegen-middlewares"
 )
 
 func extTypeName(extPropValue interface{}) (string, error) {
@@ -48,4 +49,16 @@ func extExtraTags(extPropValue interface{}) (map[string]string, error) {
 		return nil, fmt.Errorf("failed to unmarshal json: %w", err)
 	}
 	return tags, nil
+}
+
+func extMiddlewares(extPropValue interface{}) ([]string, error) {
+	raw, ok := extPropValue.(json.RawMessage)
+	if !ok {
+		return nil, fmt.Errorf("failed to convert type: %T", extPropValue)
+	}
+	var middlewares []string
+	if err := json.Unmarshal(raw, &middlewares); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal json: %w", err)
+	}
+	return middlewares, nil
 }
